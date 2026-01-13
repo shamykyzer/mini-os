@@ -1,0 +1,18 @@
+# Ignore logs, build artifacts and generated images
+# Log files
+logQ.txt
+*.log
+
+# Build artifacts and temporary files
+build/
+*.o
+*.elf
+*.bin
+
+# ISO and images (tracked with LFS if needed)
+*.iso
+*.img
+
+# Misc
+.DS_Store
+__pycache__/
