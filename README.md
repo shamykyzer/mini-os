@@ -296,7 +296,7 @@ Forces the kernel’s link address to 1MB and lays out `.text/.rodata/.data/.bss
 * **Testing:**
   If the framebuffer output appears in QEMU, `kmain` executed successfully.
 
-<img width="833" height="337" alt="4" src="https://github.com/user-attachments/assets/01c82739-1251-4eef-a484-ee329f93095c" />
+<img width="833" height="337" alt="4" src="https://github.com/user-attachments/assets/11b7726e-c85c-4e82-a7b1-37e337605cea" />
 
 
 Builds a valid initial stack and calls into C (`kmain`) from the Multiboot entrypoint since there is no OS-provided stack or runtime at boot; setting `esp` is required before any C code can safely run.
@@ -318,7 +318,7 @@ stack_top:
 
 * **Goal:** Add a driver to write directly to the VGA text framebuffer at `0xB8000`.
 
-<img width="967" height="899" alt="5" src="https://github.com/user-attachments/assets/54844eb6-b7b5-4694-af53-d5e42f5a220c" />
+<img width="967" height="899" alt="5" src="https://github.com/user-attachments/assets/504d6e4f-4f38-4131-b805-555541c36119" />
 
 * **Features:**
   * `write_cell` — writes character and attribute
@@ -362,7 +362,7 @@ void put_char(char c) {
   * `task1` runs a VGA demo (`vga_test`) that shows text printing, colors, cursor movement, and scrolling.
   * `task2 [a b c]` prints the results of the C helper functions (`sum_of_three`, `max_of_three`, `product_of_three`) (defaults to `1 2 3`).
  
-<img width="745" height="309" alt="6" src="https://github.com/user-attachments/assets/95d0e37f-1ebe-4ac8-8695-d8b602668cc1" />
+<img width="745" height="309" alt="6" src="https://github.com/user-attachments/assets/dc9119c3-7541-4b44-be6c-b5ec6cff0781" />
 
 The simplest way to exercise the framebuffer from C is via interactive commands:
 - `task1` for the VGA output demo
@@ -472,7 +472,7 @@ The shell needs a blocking “read line” API; buffering decouples fast IRQ arr
 
 The OS includes a simple interactive shell (`kmain` loop) with the following commands:
 
-<img width="1229" height="1023" alt="7" src="https://github.com/user-attachments/assets/d85771f4-c1a3-405c-bd9d-3414ed19c7d0" />
+<img width="1229" height="1023" alt="7" src="https://github.com/user-attachments/assets/dd8a3531-4ac8-4194-a15f-8eecad330fea" />
 
 * **`help`**: Draws a boxed help menu of available commands.
 * **`clear`**: Clears the screen.
@@ -503,7 +503,7 @@ The OS includes a simple interactive shell (`kmain` loop) with the following com
 
 This repo includes a simple **calculator sub-shell** that runs inside the kernel shell.
 
-<img width="657" height="901" alt="{655C313D-B5F2-41CC-8B61-41D0F12ACA66}" src="https://github.com/user-attachments/assets/142176c8-92bb-4e69-93eb-bd4abbf5e803" />
+<img width="657" height="901" alt="8" src="https://github.com/user-attachments/assets/07e0470b-5898-45b9-a701-c4c9424afbee" />
 
 ### How to use
 
@@ -581,7 +581,7 @@ if (k_match_cmd(buf, "div", &args)) {
 
 This repo includes a simple TicTacToe mini-game that runs inside the kernel shell.
 
-<img width="1113" height="865" alt="{F5C15A05-5A58-4D94-9104-9AB6295B069D}" src="https://github.com/user-attachments/assets/84d45885-ca11-48db-982f-a9766868faf3" />
+<img width="1113" height="865" alt="9" src="https://github.com/user-attachments/assets/81a85836-e04a-463e-8f43-d9b704058e7f" />
 
 ### How to use
 
@@ -635,7 +635,7 @@ In code, this logic lives in `ttt_won(board, player)`:
 - If `board[a] == player && board[b] == player && board[c] == player`, it returns **1** (win found).
 - If none match, it returns **0** (no win yet).
 
-<img width="1113" height="865" alt="9" src="https://github.com/user-attachments/assets/349cdd82-fb2f-457c-86c0-677b2429beb9" />
+<img width="1089" height="523" alt="10" src="https://github.com/user-attachments/assets/ebeb06e8-1fb4-4961-9af5-53c02891626e" />
 
 **Example:** if player **X** has marks at indices `0, 4, 8` (input squares `1, 5, 9`), then the diagonal `(0,4,8)` matches and `ttt_won(...)` returns true. After that, the main loop prints `Winner: X` and sets `game_over = 1` so no more numeric moves are accepted until `restart` or `quit`.
 
