@@ -151,7 +151,8 @@ LDFLAGS = -T $(DRV_DIR)/link.ld -melf_i386
   make all
   ```
 
-<img width="1739" height="1465" alt="{C1759531-248C-4CFD-9957-8E4DEB526379}" src="https://github.com/user-attachments/assets/cf7cec01-7b8f-49e9-af1e-098eb814addc" />
+<img width="1739" height="1465" alt="1" src="https://github.com/user-attachments/assets/b8bb5b71-8fae-453d-943d-26d1db20f1ff" />
+
 
 **Versioning note:** `make` generates `build/version.h` from `git rev-list --count HEAD` so the `version` shell command updates automatically after each new commit (next rebuild).
 
@@ -201,7 +202,8 @@ This provides a simple, deterministic **“version number”** without needing a
   make clean
   ```
 
-<img width="873" height="79" alt="{6A19CBCF-7EC4-4A4E-97B0-A8E98F87DD91}" src="https://github.com/user-attachments/assets/9c303e76-4862-46ec-bcc5-ced599b80fd2" />
+<img width="873" height="79" alt="2" src="https://github.com/user-attachments/assets/4a9b7eb6-05e7-473a-a049-530bc5590a05" />
+
 
 ---
 
@@ -286,14 +288,16 @@ Forces the kernel’s link address to 1MB and lays out `.text/.rodata/.data/.bss
 
 * **Goal:** Create a Multiboot-compliant loader and jump into C code.
 
-<img width="1307" height="771" alt="{62B8A052-BDFA-4B4D-9BA2-73FD270F675F}" src="https://github.com/user-attachments/assets/abac6a91-ed19-486d-a791-0f5331e49a34" />
+<img width="1307" height="771" alt="3" src="https://github.com/user-attachments/assets/d9c66a6f-7071-457b-bd13-6c263d5bd990" />
+
 
 * **Implementation:**
   `drivers/loader.asm` contains the Multiboot header and defines the `loader` label. It sets up a temporary stack and calls `extern kmain`.
 * **Testing:**
   If the framebuffer output appears in QEMU, `kmain` executed successfully.
 
-<img width="833" height="337" alt="{F29A4136-AE2D-4449-AAED-C9E397D8A721}" src="https://github.com/user-attachments/assets/c6439e3a-3747-4578-9198-2a01a63ca9ae" />
+<img width="833" height="337" alt="4" src="https://github.com/user-attachments/assets/01c82739-1251-4eef-a484-ee329f93095c" />
+
 
 Builds a valid initial stack and calls into C (`kmain`) from the Multiboot entrypoint since there is no OS-provided stack or runtime at boot; setting `esp` is required before any C code can safely run.
 
@@ -314,7 +318,7 @@ stack_top:
 
 * **Goal:** Add a driver to write directly to the VGA text framebuffer at `0xB8000`.
 
-<img width="967" height="899" alt="{45AB0557-8BB7-45B3-AF23-BBD70C94E8C6}" src="https://github.com/user-attachments/assets/7134dacf-2a22-4d56-8f69-79f1183096f5" />
+<img width="967" height="899" alt="5" src="https://github.com/user-attachments/assets/54844eb6-b7b5-4694-af53-d5e42f5a220c" />
 
 * **Features:**
   * `write_cell` — writes character and attribute
@@ -358,7 +362,7 @@ void put_char(char c) {
   * `task1` runs a VGA demo (`vga_test`) that shows text printing, colors, cursor movement, and scrolling.
   * `task2 [a b c]` prints the results of the C helper functions (`sum_of_three`, `max_of_three`, `product_of_three`) (defaults to `1 2 3`).
  
-<img width="745" height="309" alt="{CC7F9C75-7D44-4267-9B53-F5D1BD44F78D}" src="https://github.com/user-attachments/assets/c9f7d0f8-45df-4fe4-b838-7fc32d92f72b" />
+<img width="745" height="309" alt="6" src="https://github.com/user-attachments/assets/95d0e37f-1ebe-4ac8-8695-d8b602668cc1" />
 
 The simplest way to exercise the framebuffer from C is via interactive commands:
 - `task1` for the VGA output demo
@@ -468,7 +472,7 @@ The shell needs a blocking “read line” API; buffering decouples fast IRQ arr
 
 The OS includes a simple interactive shell (`kmain` loop) with the following commands:
 
-<img width="1229" height="1023" alt="{1F1DC8A4-5CB5-40E5-8A34-9A561942BE2D}" src="https://github.com/user-attachments/assets/afd0966a-ef5f-4543-adfe-d83a1fb03f71" />
+<img width="1229" height="1023" alt="7" src="https://github.com/user-attachments/assets/d85771f4-c1a3-405c-bd9d-3414ed19c7d0" />
 
 * **`help`**: Draws a boxed help menu of available commands.
 * **`clear`**: Clears the screen.
@@ -631,7 +635,7 @@ In code, this logic lives in `ttt_won(board, player)`:
 - If `board[a] == player && board[b] == player && board[c] == player`, it returns **1** (win found).
 - If none match, it returns **0** (no win yet).
 
-<img width="1089" height="523" alt="{05D51C56-2CCD-48FA-B837-3D43DCF5A4BB}" src="https://github.com/user-attachments/assets/babe3c03-42e7-49b0-9c35-24bd29f7b79e" />
+<img width="1113" height="865" alt="9" src="https://github.com/user-attachments/assets/349cdd82-fb2f-457c-86c0-677b2429beb9" />
 
 **Example:** if player **X** has marks at indices `0, 4, 8` (input squares `1, 5, 9`), then the diagonal `(0,4,8)` matches and `ttt_won(...)` returns true. After that, the main loop prints `Winner: X` and sets `game_over = 1` so no more numeric moves are accepted until `restart` or `quit`.
 
