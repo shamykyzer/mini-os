@@ -1,6 +1,3 @@
-[![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/KDnyZehY)
-
-
 # Worksheet 2 — Simple OS Kernel (VGA Text Mode & Interrupts)
 
 This project is a small 32-bit teaching kernel built for Worksheet 2 (Part 1 & Part 2). It boots through GRUB using a Multiboot header, enters the assembly loader, sets up the Interrupt Descriptor Table (IDT) and drivers (Keyboard, Framebuffer), and launches a simple interactive shell.
