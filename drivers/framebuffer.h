@@ -6,6 +6,7 @@
 #ifndef FRAMEBUFFER_H
 #define FRAMEBUFFER_H
 
+
 /* basic fixed-width types used throughout the driver */
 typedef unsigned char  uint8_t;
 typedef unsigned short uint16_t;
