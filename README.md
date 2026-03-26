@@ -64,6 +64,22 @@ os.iso               (generated) Bootable ISO image
 
 ## Toolchain and Build
 
+### Reference Environment
+
+Results in this document were produced on the following system:
+
+| Component | Version |
+|---|---|
+| CPU | AMD Ryzen AI 9 365 (Zen 5, 10C/20T) with Radeon 880M |
+| OS | Ubuntu 24.04 on WSL2 (kernel 6.6.87.1-microsoft-standard-WSL2) |
+| GCC | 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1) |
+| NASM | 2.16.01 |
+| GNU ld | 2.42 (GNU Binutils for Ubuntu) |
+| QEMU | 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.13) |
+| genisoimage | 1.1.11 |
+
+Benchmark cycle counts (`bench` command) will vary on different CPUs and QEMU backends (TCG vs KVM).
+
 ### Required Tools
 
 | Tool | Purpose |
