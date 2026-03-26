@@ -1,28 +1,28 @@
-# Worksheet 2 — Simple OS Kernel (VGA Text Mode & Interrupts)
+# SnowOS — Bare-Metal x86-32 Kernel
 
-This project is a small 32-bit teaching kernel built for Worksheet 2 (Part 1 & Part 2). It boots through GRUB using a Multiboot header, enters the assembly loader, sets up the Interrupt Descriptor Table (IDT) and drivers (Keyboard, Framebuffer), and launches a simple interactive shell.
-
-The work follows Chapters 1 to 4 of *The Little Book of OS Development* and the worksheet specification.
+A freestanding 32-bit x86 kernel targeting the IA-32 architecture. Boots via GRUB/Multiboot, provides VGA text-mode console I/O, interrupt-driven keyboard input, and an interactive shell with sub-applications. All claims are quantified and verifiable via built-in instrumentation (`sysinfo`, `bench`).
 
 ---
 
-## Table of Contents
+## System Specifications
 
-* [Repository Structure](#repository-structure)
-* [Prerequisites](#prerequisites)
-* [Build and Run](#build-and-run)
-* [Boot Sequence](#boot-sequence)
-* [Linker Script](#linker-script)
-* [Tasks](#tasks)
-  * [Task 1 — Bootloader and Kernel Entry](#task-1--bootloader-and-kernel-entry)
-  * [Task 2 — VGA Text Mode Framebuffer Driver](#task-2--vga-text-mode-framebuffer-driver)
-  * [Task 3 — Kernel Demo Using the Framebuffer](#task-3--kernel-demo-using-the-framebuffer)
-  * [Worksheet 2 Part 2 — Interrupts and Keyboard](#worksheet-2-part-2--interrupts-and-keyboard)
-* [Shell Features](#shell-features)
-* [Calculator (`calc`) Implementation Notes](#calculator-calc-implementation)
-* [TicTacToe (`tictactoe`) Implementation Notes](#tictactoe-tictactoe-implementation)
-* [Testing and Verification](#testing-and-verification)
-* [Known Limitations](#known-limitations)
+| Parameter | Value | Source / Verification |
+|---|---|---|
+| ISA | IA-32 (x86-32) | `gcc -m32`, `ld -melf_i386` |
+| Boot protocol | Multiboot 1 | Magic `0x1BADB002` in `loader.asm` |
+| Kernel load address | `0x00100000` (1 MiB) | Linker script `link.ld` |
+| Binary size | 24,738 B `.text` / 364 B `.data` / 7,616 B `.bss` | `make size` |
+| Display | VGA text mode: 80 x 25 cells, 16 colors | `FRAMEBUFFER_ADDRESS = 0xB8000` |
+| Input | PS/2 keyboard via IRQ1 (port `0x60`) | Scancode table in `keyboard.c` |
+| Interrupt controller | Dual 8259A PIC | Remapped to vectors `0x20`-`0x2F` |
+| IDT gates installed | 48 | 32 CPU exceptions + 16 hardware IRQs |
+| Kernel stack | 4,096 bytes | BSS-allocated in `loader.asm` |
+| Input buffer | 256 bytes (circular ring) | `keyboard.c` |
+| Command buffer | 128 bytes | `kernel.c` shell loop |
+| Heap / dynamic memory | 0 bytes | All storage is static or BSS |
+| Scheduling model | Single-threaded, blocking I/O | `hlt` in keyboard wait loop |
+| C runtime | None | `-ffreestanding -nostdlib -nostdinc` |
+| Emulation target | QEMU `qemu-system-i386` | `-m 32` (32 MiB guest RAM) |
 
 ---
 
@@ -30,732 +30,404 @@ The work follows Chapters 1 to 4 of *The Little Book of OS Development* and the 
 
 ```
 source/
-  ├── kernel.c         # Kernel entry, demo output, interactive shell
-  ├── menu.c/h         # Shell-facing APIs (help menu + calc/tictactoe entrypoints + Task 2 helpers)
-  ├── calc.c           # Calculator sub-shell ("calc" command) (parsing helpers are shared; see drivers/framebuffer.*)
-  ├── tictactoe.c      # TicTacToe mini-game sub-shell
+  kernel.c           Main kernel entry, shell loop, bench/sysinfo commands
+  menu.c / menu.h    Help menu, calculator/tictactoe entry, Task 2 helpers
+  calc.c             Calculator sub-shell
+  tictactoe.c        TicTacToe game
+
 drivers/
-  ├── loader.asm       # Multiboot loader, stack setup, call to kmain
-  ├── link.ld          # Linker script, kernel linked at 1 MB
-  ├── types.h          # Fixed-width types for freestanding code
-  ├── idt.c/h          # Interrupt Descriptor Table (IDT) setup + load
-  ├── idt_load.asm     # assembly wrapper for lidt
-  ├── isr.c/h          # ISR/IRQ registration + dispatch + IDT gate setup
-  ├── interrupts.asm   # ISR/IRQ assembly stubs
-  ├── io.s             # I/O port wrappers (inb/outb)
-  ├── io.h
-  ├── framebuffer.c    # VGA text-mode driver: cursor, colours, scroll (+ shared CLI parsing helpers)
-  ├── framebuffer.h
-  ├── keyboard.c       # Keyboard driver
-  ├── keyboard.h
-  ├── pic.c            # Programmable Interrupt Controller driver
-  └── pic.h
-iso/
-  └── boot/
-      └── grub/
-          ├── menu.lst
-          └── stage2_eltorito
-screenshots/
-  └── .gitkeep
+  loader.asm         Multiboot header, stack setup, call to kmain
+  link.ld            Linker script (kernel @ 1 MiB, section boundary symbols)
+  types.h            Fixed-width integer types (uint8_t - uint64_t)
+  idt.c / idt.h      Interrupt Descriptor Table setup + LIDT
+  idt_load.asm       Assembly wrapper for LIDT instruction
+  isr.c / isr.h      ISR/IRQ dispatch, IDT gate installation, IRQ counters
+  interrupts.asm     ISR/IRQ assembly stubs (32 exceptions + 16 IRQs)
+  io.s / io.h        I/O port wrappers (inb / outb)
+  framebuffer.c / .h VGA text-mode driver: cursor, colors, scroll, hex output
+  keyboard.c / .h    PS/2 keyboard driver: IRQ1 handler, circular buffer
+  pic.c / pic.h      8259A PIC remapping and EOI
 
-build/                 # (generated by `make`)
-  ├── *.o              # object files
-  └── version.h        # (generated) git-based version header used by `version` command
-Makefile               # Build rules + QEMU run targets
-README.md
+iso/boot/grub/
+  menu.lst           GRUB boot menu (entry: "SnowOS")
+  stage2_eltorito    GRUB stage2 bootloader binary
 
-kernel.elf              # (generated) linked kernel output
-os.iso                  # (generated) bootable ISO output
-logQ.txt                # (generated) QEMU CPU log output (run targets)
+build/               (generated)
+  *.o                Object files
+  version.h          Git commit count (#define OS_GIT_COMMIT_COUNT)
 
-iso/boot/kernel.elf     # (generated) copied into ISO by `make`
+kernel.elf           (generated) Linked kernel ELF binary
+os.iso               (generated) Bootable ISO image
 ```
-
-**What it does:** Shows how the build explicitly links together the “drivers + kernel + apps” objects into one freestanding `kernel.elf`.
-
-```make
-OBJS = $(BUILD_DIR)/loader.o \
-       $(BUILD_DIR)/idt_load.o \
-       $(BUILD_DIR)/interrupts.o \
-       $(BUILD_DIR)/idt.o \
-       $(BUILD_DIR)/isr.o \
-       $(BUILD_DIR)/kernel.o  \
-       $(BUILD_DIR)/menu.o  \
-       $(BUILD_DIR)/calc.o  \
-       $(BUILD_DIR)/tictactoe.o  \
-       $(BUILD_DIR)/framebuffer.o \
-       $(BUILD_DIR)/io.o \
-       $(BUILD_DIR)/pic.o \
-       $(BUILD_DIR)/keyboard.o
-```
-
-This object list is the concrete wiring between your C/ASM files and the final bootable kernel.
 
 ---
 
-## Prerequisites
+## Toolchain and Build
 
-Install the following tools:
+### Required Tools
 
-* `nasm`
-* `make`
-* `gcc` with 32-bit support (`gcc -m32`)
-* `ld` (from `binutils`)
-* `genisoimage` (the Makefile invokes `genisoimage`; `mkisofs` may work if it is an alias on your system)
-* `qemu-system-i386`
+| Tool | Purpose |
+|---|---|
+| `nasm` | Assembler: Multiboot loader, IDT load, ISR/IRQ stubs, I/O ports |
+| `gcc` (with `-m32`) | C compiler: all kernel and driver C sources |
+| `ld` | GNU linker: ELF i386 target with custom linker script |
+| `genisoimage` | ISO 9660 image creation for GRUB boot |
+| `qemu-system-i386` | IA-32 system emulator |
 
-### Installing Required Packages on Linux
-
-When running outside of CSCT on Linux, you need to install the following packages:
-
-```bash
+Install on Debian/Ubuntu:
+```sh
 sudo apt install make gcc gcc-multilib binutils nasm genisoimage qemu-system-x86
 ```
 
-**Note:** The `qemu-system-x86` package provides the `qemu-system-i386` binary required by the Makefile.
+### Compiler Flags
 
-**Additional packages that may be needed:**
-* For 32-bit compilation support: `gcc-multilib` (required if `gcc -m32` fails)
-* `binutils` (provides `ld`)
+| Flag | Effect |
+|---|---|
+| `-m32` | Generate 32-bit (IA-32) code |
+| `-ffreestanding` | No hosted environment assumed |
+| `-O2` | Optimization level 2 |
+| `-nostdlib` | No standard library linking |
+| `-nostdinc` | No standard include paths |
+| `-fno-builtin` | Disable GCC built-in function replacement |
+| `-fno-stack-protector` | No stack canary (no runtime support available) |
+| `-Wall -Wextra` | Enable comprehensive warnings |
 
-### WSL (Windows Subsystem for Linux) Notes
+### Linker Flags
 
-This project has been built and run under **WSL2**. If you are using WSL, install the same packages listed above inside your WSL distro (e.g., Ubuntu).
+| Flag | Effect |
+|---|---|
+| `-T drivers/link.ld` | Custom linker script: load at 1 MiB, 4 KiB-aligned sections |
+| `-melf_i386` | 32-bit ELF output format |
 
-* **Verify QEMU is available in WSL:**
+### Build Commands
 
-  ```sh
-  qemu-system-i386 --version
-  ```
+| Command | Action |
+|---|---|
+| `make` | Build `kernel.elf` and `os.iso` |
+| `make run` | Boot in QEMU (curses display, serial monitor on stdio) |
+| `make run-curses` | Boot in QEMU (curses display, telnet monitor on port 45454) |
+| `make run_log` | Boot headless, CPU state logged to `logQ.txt` |
+| `make size` | Report `.text`, `.data`, `.bss` sizes via `size(1)` |
+| `make clean` | Remove all build artifacts |
 
-* **If `gcc -m32` fails in WSL:** ensure `gcc-multilib` is installed (it is included in the `apt install ...` line above).
+### Versioning
 
-```make
-CFLAGS  = -m32 -ffreestanding -O2 -Wall -Wextra \
-          -nostdlib -nostdinc -fno-builtin -fno-stack-protector -c \
-          -I$(DRV_DIR) -I$(SRC_DIR) -I$(BUILD_DIR)
-LDFLAGS = -T $(DRV_DIR)/link.ld -melf_i386
-```
-
-**Builds a 32-bit freestanding kernel**  (no libc, no hosted runtime), so you must have a working 32-bit toolchain and assembler/linker.
-
----
-
-## Build and Run
-
-* **Build the kernel and ISO:**
-
-  ```sh
-  make
-  # (equivalently)
-  make all
-  ```
-
-<img width="1739" height="1465" alt="1" src="https://github.com/user-attachments/assets/b8bb5b71-8fae-453d-943d-26d1db20f1ff" />
-
-
-**Versioning note:** `make` generates `build/version.h` from `git rev-list --count HEAD` so the `version` shell command updates automatically after each new commit (next rebuild).
-
-**Generates**  `build/version.h` containing `OS_GIT_COMMIT_COUNT`, used by the `version` shell command at runtime.
-
-```make
-$(VERSION_H): FORCE | $(BUILD_DIR)
-	@count=$$(git rev-list --count HEAD 2>/dev/null || echo 0); \
-	tmp="$(BUILD_DIR)/version.h.tmp"; \
-	printf "%s\n" "#ifndef VERSION_H" > $$tmp; \
-	printf "%s\n" "#define VERSION_H" >> $$tmp; \
-	printf "%s\n" "#define OS_GIT_COMMIT_COUNT $$count" >> $$tmp; \
-	printf "%s\n" "#endif" >> $$tmp; \
-	if [ ! -f $@ ] || ! cmp -s $$tmp $@; then mv $$tmp $@; else rm $$tmp; fi
-```
-This provides a simple, deterministic **“version number”** without needing a filesystem, RTC, or extra tooling in the kernel.
-
-**Run target note:** All `make run*` targets log CPU state to `logQ.txt` (via QEMU flags `-d cpu -D logQ.txt`) so you always get a repeatable artifact for verification/debugging.
-
-* **Run the kernel in QEMU (curses VGA + serial monitor on your terminal):**
-
-  ```sh
-  make run
-  ```
-
-* **Run the kernel in QEMU (curses VGA + QEMU monitor via telnet on port `45454` by default):**
-
-  ```sh
-  make run-curses
-  ```
-
-  To change the telnet monitor port:
-
-  ```sh
-  make run-curses MON_PORT=75554
-  ```
-
-* **Run headless (no curses UI) and still generate `logQ.txt` (note: you will not see VGA output):**
-
-  ```sh
-  make run_log
-  ```
-
-* **Clean build artifacts + generated outputs (`build/*.o`, `kernel.elf`, `os.iso`, `logQ.txt`):**
-
-  ```sh
-  make clean
-  ```
-
-<img width="873" height="79" alt="2" src="https://github.com/user-attachments/assets/4a9b7eb6-05e7-473a-a049-530bc5590a05" />
-
+`make` generates `build/version.h` containing `OS_GIT_COMMIT_COUNT` from `git rev-list --count HEAD`. The shell `version` command formats this as `SnowOS v<hundreds>.<tens>.<ones> (alpha)` (e.g., 41 commits = `v0.4.1`). Deterministic, no RTC or filesystem required.
 
 ---
 
-## Boot Sequence
+## Memory Map
 
-1. BIOS starts and performs early hardware initialisation.
-2. BIOS loads GRUB from the ISO.
-3. GRUB scans the loaded kernel image for the Multiboot header (defined in `drivers/loader.asm` and included in the final kernel binary).
-4. GRUB validates the Multiboot header, including the magic number `0x1BADB002` (and its required fields such as the checksum).
-5. GRUB loads `kernel.elf` segments to the physical addresses specified by the ELF program headers (in this project, linked to start at `0x00100000`).
-6. GRUB jumps to the kernel entry point (the `loader` label).
-7. `drivers/loader.asm` sets up a stack, demonstrates calling a C helper (`sum_of_three(1,2,3)`), then calls the C function `kmain`.
-8. `kmain` initializes the framebuffer, builds and loads the IDT, remaps/configures the PIC and installs interrupt gates, initializes the keyboard driver, enables interrupts (`sti`), prints a demo banner, and enters the shell loop.
+### Physical Address Space
 
-**Shows the exact “ASM → C” handoff** : loader sets a stack and calls `kmain()`, then `kmain()` initializes drivers and enables interrupts.
+| Address Range | Size | Contents |
+|---|---|---|
+| `0x00000000` - `0x000003FF` | 1,024 B | Real-mode Interrupt Vector Table (BIOS) |
+| `0x000B8000` - `0x000B8F9F` | 4,000 B | VGA text buffer (80 x 25 x 2 bytes/cell) |
+| `0x00100000` - `0x00100000 + .text` | ~24 KiB | Kernel code (`.text` section) |
+| ... | ~1 KiB | Read-only data (`.rodata` section) |
+| ... | ~1 KiB | Initialized data (`.data` section) |
+| ... | ~8 KiB | BSS: kernel stack, IDT, handler table, buffers |
 
-```asm
-; drivers/loader.asm (entrypoint GRUB jumps to)
-loader:
-    mov esp, stack_top
+Run `sysinfo` at the shell prompt to see exact addresses and byte counts for the current build.
 
-    push dword 3
-    push dword 2
-    push dword 1
-    call sum_of_three
-    add esp, 12
+### Kernel Section Layout
 
-    call kmain
-.hang:
-    jmp .hang
-```
+Sections are ordered and 4 KiB-aligned per `link.ld`. Boundary symbols (`_text_start`, `_text_end`, etc.) are exported for runtime introspection.
 
-```c
-// source/kernel.c (kmain init path)
-void kmain(void) {
-    init_framebuffer();
-    init_idt();
-    init_interrupt_gates();
-    init_keyboard();
-    __asm__ __volatile__("sti");
-    write_str("Status: IRQ on | keyboard ready\n");
-    // ... then enters the shell loop ...
-}
-```
+| Section | Contents | Alignment |
+|---|---|---|
+| `.text` | Executable code (C + ASM) | 4,096 B |
+| `.rodata` | String literals, lookup tables, constants | 4,096 B |
+| `.data` | Initialized global/static variables | 4,096 B |
+| `.bss` | Kernel stack (4 KiB), IDT (2 KiB), handler table (1 KiB), keyboard buffer (256 B) | 4,096 B |
 
-Without a C runtime, you must create a valid stack and explicitly call into C; likewise, interrupts must be enabled only after IDT/PIC/handlers are ready.
+### VGA Cell Format
+
+Each of the 2,000 display cells occupies 2 bytes at `0xB8000`:
+
+| Byte | Bits | Field |
+|---|---|---|
+| 0 | 7:0 | ASCII character code |
+| 1 | 3:0 | Foreground color (4-bit, 16 values) |
+| 1 | 7:4 | Background color (4-bit, 16 values) |
+
+Total framebuffer size: 80 x 25 x 2 = **4,000 bytes**.
 
 ---
 
-## Linker Script
+## Architecture
 
-The linker script (drivers/link.ld) loads the kernel at 1 MB (0x00100000) because memory below that is used by GRUB, BIOS, and hardware.
+### Boot Sequence
 
-The script groups sections as follows:
+| Step | Component | Action | Verifiable by |
+|---|---|---|---|
+| 1 | BIOS | POST, loads GRUB from ISO | QEMU boot |
+| 2 | GRUB | Validates Multiboot header (`0x1BADB002`) | Boot succeeds or fails |
+| 3 | GRUB | Loads `kernel.elf` to `0x00100000` per ELF headers | `sysinfo` shows `_text_start = 0x00100000` |
+| 4 | GRUB | Jumps to `loader` entry point | — |
+| 5 | `loader.asm` | Sets ESP to 4 KiB stack top (BSS) | — |
+| 6 | `loader.asm` | Calls `sum_of_three(1,2,3)` via cdecl ABI | `task2` returns sum=6 |
+| 7 | `loader.asm` | Calls `kmain()` | Shell prompt appears |
+| 8 | `kmain` | `init_framebuffer()` — clears 2,000 VGA cells | Screen clears |
+| 9 | `kmain` | `init_idt()` — loads 2,048-byte IDT via LIDT | — |
+| 10 | `kmain` | `init_interrupt_gates()` — installs 48 gates, remaps PIC | — |
+| 11 | `kmain` | `init_keyboard()` — registers IRQ1, unmasks on PIC | — |
+| 12 | `kmain` | `sti` — enables maskable interrupts | `Status: IRQ on` printed |
+| 13 | `kmain` | Enters shell loop | `snowos>` prompt appears |
 
-    .text (code)
-    .rodata (read-only data)
-    .data (initialized variables)
-    .bss (zeroed variables)
+### Interrupt Subsystem
 
-Each section is aligned to 4 KB boundaries.
+**IDT Configuration:**
 
-```ld
-ENTRY(loader)
-SECTIONS {
-    . = 0x00100000; /* Kernel loaded at 1MB */
+| Property | Value |
+|---|---|
+| Table size | 256 entries x 8 bytes = 2,048 bytes |
+| Populated gates | 48 (vectors 0-31 + 32-47) |
+| Gate type | `0x8E` — 32-bit interrupt gate, ring 0, present |
+| Segment selector | `0x08` — kernel code segment |
 
-    .text ALIGN(4K) : { *(.text) }
-    .rodata ALIGN(4K) : { *(.rodata*) }
-    .data ALIGN(4K) : { *(.data) }
-    .bss  ALIGN(4K) : { *(COMMON) *(.bss) }
-}
-```
+**PIC Remapping:**
 
-Forces the kernel’s link address to 1MB and lays out `.text/.rodata/.data/.bss` with page alignment. A custom linker script is required for kernels so the binary layout is predictable and compatible with the bootloader + your memory map assumptions.
+| PIC | Default Vectors | Remapped Vectors | Command Port | Data Port |
+|---|---|---|---|---|
+| Master (8259A #1) | `0x08`-`0x0F` | `0x20`-`0x27` | `0x20` | `0x21` |
+| Slave (8259A #2) | `0x70`-`0x77` | `0x28`-`0x2F` | `0xA0` | `0xA1` |
 
----
+Remapping is required because default IRQ0-7 vectors (`0x08`-`0x0F`) overlap CPU exception vectors.
 
-## Tasks
+**IRQ Dispatch Path (measured per-IRQ via counters):**
 
-### Task 1 — Bootloader and Kernel Entry
+1. Hardware asserts IRQ line -> PIC delivers interrupt vector to CPU
+2. CPU indexes IDT entry, pushes EFLAGS/CS/EIP, jumps to ASM stub
+3. ASM stub: `PUSHA`, saves DS, sets kernel data segment, calls C `irq_handler()`
+4. `irq_handler()`: increments per-IRQ counter, sends EOI to PIC, dispatches to registered callback
+5. ASM stub: restores DS, `POPA`, `IRET` to interrupted code
 
-* **Goal:** Create a Multiboot-compliant loader and jump into C code.
+Run `sysinfo` to see cumulative per-IRQ event counts since boot.
 
-<img width="1307" height="771" alt="3" src="https://github.com/user-attachments/assets/d9c66a6f-7071-457b-bd13-6c263d5bd990" />
+### Framebuffer Driver
 
+| Property | Value |
+|---|---|
+| Base address | `0x000B8000` |
+| Resolution | 80 columns x 25 rows = 2,000 cells |
+| Cell size | 2 bytes (character + attribute) |
+| Buffer size | 4,000 bytes |
+| Color depth | 4-bit foreground x 4-bit background (256 combinations) |
+| Cursor control | VGA I/O ports `0x3D4` (command), `0x3D5` (data) |
+| Scroll method | Byte-by-byte row copy upward, clear last row |
 
-* **Implementation:**
-  `drivers/loader.asm` contains the Multiboot header and defines the `loader` label. It sets up a temporary stack and calls `extern kmain`.
-* **Testing:**
-  If the framebuffer output appears in QEMU, `kmain` executed successfully.
+Run `bench` to measure cycles per `clear_screen()`, `write_str()`, and `put_char()`.
 
-<img width="833" height="337" alt="4" src="https://github.com/user-attachments/assets/11b7726e-c85c-4e82-a7b1-37e337605cea" />
+### Keyboard Driver
 
-
-Builds a valid initial stack and calls into C (`kmain`) from the Multiboot entrypoint since there is no OS-provided stack or runtime at boot; setting `esp` is required before any C code can safely run.
-
-```asm
-; drivers/loader.asm
-loader:
-    mov esp, stack_top
-    call kmain
-
-section .bss
-align 4
-stack_bottom:
-    resb 4096
-stack_top:
-```
-
-### Task 2 — VGA Text Mode Framebuffer Driver
-
-* **Goal:** Add a driver to write directly to the VGA text framebuffer at `0xB8000`.
-
-<img width="967" height="899" alt="5" src="https://github.com/user-attachments/assets/504d6e4f-4f38-4131-b805-555541c36119" />
-
-* **Features:**
-  * `write_cell` — writes character and attribute
-  * `cursor_x` / `cursor_y` — software cursor tracking
-  * Hardware cursor control via VGA ports `0x3D4` and `0x3D5`
-  * `set_color` — sets 4-bit foreground/background color
-  * `clear_screen` — wipes the screen
-  * `scroll_if_needed` — scrolls lines when bottom is reached
-
-VGA text mode gives us instant console output early on: we write characters directly into the VGA text buffer at `0xB8000` (each cell is a character byte + a color/attribute byte). We also keep the blinking hardware cursor in sync with our `(cursor_x, cursor_y)`.
-
-```c
-// drivers/framebuffer.c
-static void write_cell(uint16_t index, char c, uint8_t fg, uint8_t bg) {
-    uint8_t attr = (bg << 4) | (fg & 0x0F);
-    framebuffer[2 * index]     = (uint8_t)c;
-    framebuffer[2 * index + 1] = attr;
-}
-```
-
-This is the simplest “print” you can have in a tiny kernel, and it makes debugging everything else possible.
-
-```c
-void put_char(char c) {
-    if (c == '\n') { cursor_x = 0; cursor_y++; scroll_if_needed(); update_cursor(); return; }
-    uint16_t index = cursor_y * FRAMEBUFFER_WIDTH + cursor_x;
-    write_cell(index, c, current_fg, current_bg);
-    cursor_x++;
-    if (cursor_x >= FRAMEBUFFER_WIDTH) { cursor_x = 0; cursor_y++; }
-    scroll_if_needed();
-    update_cursor();
-}
-```
-
-`put_char` writes one character to `0xB8000` at the current `(cursor_x, cursor_y)`, handles `\n`/wrapping/scrolling, and updates the VGA hardware cursor to match.
-
-### Task 3 — Kernel Demo Using the Framebuffer
-
-* **Goal:** Demonstrate framebuffer API from C code.
-* **Features:**
-  * `task1` runs a VGA demo (`vga_test`) that shows text printing, colors, cursor movement, and scrolling.
-  * `task2 [a b c]` prints the results of the C helper functions (`sum_of_three`, `max_of_three`, `product_of_three`) (defaults to `1 2 3`).
- 
-<img width="745" height="309" alt="6" src="https://github.com/user-attachments/assets/dc9119c3-7541-4b44-be6c-b5ec6cff0781" />
-
-The simplest way to exercise the framebuffer from C is via interactive commands:
-- `task1` for the VGA output demo
-- `task2 1 2 3` to print sum/max/product
-
-**This is a concrete proof that (1) ASM→C calling works, and (2) basic console output is working before building a shell on top.**
-
-### Worksheet 2 Part 2 — Interrupts and Keyboard
-
-* **Goal:** Enable hardware interrupts and handle keyboard input.
-* **Implementation:**
-  * **IDT:** Build and load the Interrupt Descriptor Table (`drivers/idt.c`, `drivers/idt_load.asm`).
-  * **PIC:** Remap the Programmable Interrupt Controller to `0x20–0x2F` to avoid CPU exception vectors (`drivers/pic.c`).
-  * **ISRs/IRQs:** Install gates for CPU exceptions (0–31) and hardware IRQs (32–47) and dispatch them in C (`drivers/isr.c`, `drivers/interrupts.asm`).
-  * **Keyboard (IRQ1):** Read scancodes from port `0x60`, translate to ASCII, and provide a blocking line-reader for the shell (`drivers/keyboard.c`, `kbd_readline(...)`).
-  * **Enable interrupts:** `sti` is executed in `kmain` after IDT + drivers are initialized.
-
-### Relevant code snippets (what/why)
-
-**IDT (descriptor wiring)**
-Splits a handler address into IDT gate fields, then loads the IDT pointer with `lidt`.
-
-```c
-// drivers/idt.c
-void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags) {
-    idt_entries[num].base_lo = base & 0xFFFF;
-    idt_entries[num].base_hi = (base >> 16) & 0xFFFF;
-    idt_entries[num].sel     = sel;
-    idt_entries[num].always0 = 0;
-    idt_entries[num].flags   = flags;
-}
-
-void init_idt(void) {
-    idt_ptr.limit = sizeof(idt_entry_t) * 256 - 1;
-    idt_ptr.base  = (uint32_t)&idt_entries;
-    idt_load((uint32_t)&idt_ptr);
-}
-```
-
-The CPU must know where your exception/IRQ handlers live before interrupts are enabled.
-
-**PIC remap (avoid exception vector collisions)**
-**What it does:** Moves IRQs from vectors `0x08–0x0F` to `0x20–0x2F`.
-
-```c
-// drivers/pic.c
-void pic_remap(s32int offset1, s32int offset2) {
-    u8int a1 = inb(PIC_1_DATA);
-    u8int a2 = inb(PIC_2_DATA);
-    outb(PIC_1_COMMAND, PIC_ICW1_INIT | PIC_ICW1_ICW4);
-    outb(PIC_2_COMMAND, PIC_ICW1_INIT | PIC_ICW1_ICW4);
-    outb(PIC_1_DATA, offset1);
-    outb(PIC_2_DATA, offset2);
-    outb(PIC_1_DATA, 4);
-    outb(PIC_2_DATA, 2);
-    outb(PIC_1_DATA, PIC_ICW4_8086);
-    outb(PIC_2_DATA, PIC_ICW4_8086);
-    outb(PIC_1_DATA, a1);
-    outb(PIC_2_DATA, a2);
-}
-```
-
-IRQs must not overlap CPU exceptions (0–31), otherwise hardware interrupts look like exceptions.
-
-**IRQ dispatch + EOI**
-**What it does:** Acknowledges the interrupt (EOI) on the PIC(s) and dispatches to a registered C handler.
-
-```c
-// drivers/isr.c
-void irq_handler(registers_t *regs) {
-    if (regs->int_no >= 40) outb(PIC_2_COMMAND, PIC_ACKNOWLEDGE);
-    outb(PIC_1_COMMAND, PIC_ACKNOWLEDGE);
-
-    if (interrupt_handlers[regs->int_no] != 0) {
-        interrupt_handlers[regs->int_no](regs);
-    }
-}
-```
-
-Without EOI the PIC won’t deliver future interrupts; without dispatch you can’t plug in drivers like the keyboard.
-
-**Keyboard IRQ1 → buffered input**
-**What it does:** On each key press, reads scancode from `0x60`, maps to ASCII, echoes to screen, and pushes into a circular buffer used by `kbd_readline`.
-
-```c
-// drivers/keyboard.c
-static void keyboard_callback(registers_t *regs) {
-    (void)regs;
-    uint8_t scancode = inb(0x60);
-    if (!(scancode & 0x80)) {
-        char c = kbdus[scancode];
-        if (c != 0) { put_char(c); buffer_write(c); }
-    }
-}
-
-void init_keyboard(void) {
-    register_interrupt_handler(IRQ1, keyboard_callback);
-    // ... flush controller + unmask IRQ1 ...
-}
-```
-
-The shell needs a blocking “read line” API; buffering decouples fast IRQ arrivals from slower command parsing.
+| Property | Value |
+|---|---|
+| Interface | PS/2: port `0x60` (data), `0x64` (status/command) |
+| IRQ | IRQ1 (vector 33 after PIC remap) |
+| Scancode set | Set 1 (128-entry US QWERTY lookup table) |
+| Buffer | 256-byte circular ring buffer |
+| Read model | Blocking: CPU executes `hlt` until next interrupt |
+| Key filtering | Key-down only (bit 7 of scancode = release, ignored) |
+| Features | ASCII translation, echo to VGA, backspace handling |
 
 ---
 
-## Shell Features
+## Performance Characterization
 
-The OS includes a simple interactive shell (`kmain` loop) with the following commands:
+### Methodology
 
-<img width="1229" height="1023" alt="7" src="https://github.com/user-attachments/assets/dd8a3531-4ac8-4194-a15f-8eecad330fea" />
+All measurements use the x86 `RDTSC` (Read Time-Stamp Counter) instruction, returning CPU cycle counts. The `bench` shell command executes each operation, captures start/end TSC values, and reports elapsed cycles. Results vary by host CPU frequency and QEMU TCG/KVM configuration.
 
-* **`help`**: Draws a boxed help menu of available commands.
-* **`clear`**: Clears the screen.
-* **`task1`**: Runs a small VGA framebuffer demo (`vga_test`) that exercises colors, cursor movement, and scrolling.
-* **`echo [text]`**: Prints the provided text back to the console.
-* **`version`**: Displays the current OS version string, which is **derived automatically from the git commit count** at build time:
-  * Format: `SnowOS v<hundreds>.<tens>.<ones> (alpha)`
-  * Examples:
-    * 41 commits → `SnowOS v0.4.1 (alpha)`
-    * 137 commits → `SnowOS v1.3.7 (alpha)`
-* **`pink`**: Toggles the prompt/theme color between cyan and pink.
-* **`shutdown`**: Prints “Dividing by zero...”, waits briefly, then attempts a QEMU poweroff via an `outw` to port `0x604` (falls back to `cli; hlt`).
-* **Task 2 stack-argument helper commands** (C helpers called from ASM and exposed in the shell):
-  * **`task2 [a b c]`**: Prints **sum/max/product** results using `sum_of_three`, `max_of_three`, and `product_of_three`.
-    * If `a b c` are omitted, it defaults to the worksheet demo `(1,2,3)`.
-    * Argument parsing for `task2` uses the shared **no-libc** helpers (`k_match_cmd`, `k_parse_three_ints`) declared in `drivers/framebuffer.h`.
-* **`calc`**: Enters a calculator sub-shell (`calc>`) with its own commands:
-  * **`help`**: Prints the calculator menu.
-  * **`add a b`**, **`sub a b`**, **`mul a b`**, **`div a b`**, **`mod a b`**
-  * **`pow a b`**: Integer \(a^b\) (requires \(b \ge 0\)).
-  * **`min a b`**, **`max a b`**, **`mean a b`**: Mean is integer division \((a+b)/2\).
-  * **`quit`**: Return to the main OS shell.
-* **`tictactoe`**: Launches a TicTacToe mini-game (`ttt>`) (see below).
+### Benchmark Suite (`bench` command)
+
+| # | Test | Operation | Metric |
+|---|---|---|---|
+| 1 | Screen clear | `clear_screen()`: write 2,000 VGA cells | Total cycles, cycles/cell |
+| 2 | String write | `write_str()`: 80-character string (1 row) | Total cycles, cycles/char |
+| 3 | Char write | `put_char()`: 2,000 individual calls (1 screen) | Total cycles, cycles/char |
+| 4 | Int format | `write_dec()`: 100 integer-to-decimal conversions | Total cycles, cycles/call |
+
+### System Instrumentation (`sysinfo` command)
+
+Reports at runtime:
+
+| Category | Data |
+|---|---|
+| Memory layout | `.text`, `.rodata`, `.data`, `.bss` start/end addresses and sizes (bytes) |
+| Kernel footprint | Total bytes from `_kernel_start` to `_kernel_end` |
+| System parameters | Framebuffer geometry, IDT gate count, PIC vector range, stack/buffer sizes |
+| IRQ counters | Per-IRQ line event count and total since boot |
 
 ---
 
-## Calculator (`calc`) Implementation
+## Shell Command Reference
 
-This repo includes a simple **calculator sub-shell** that runs inside the kernel shell.
+| Command | Arguments | Description |
+|---|---|---|
+| `help` | — | Display boxed command list |
+| `clear` | — | Clear screen (fill 2,000 cells) |
+| `echo` | `<text>` | Print text to console |
+| `version` | — | Print version from git commit count |
+| `task1` | — | VGA demo: 16 foreground colors x 4 backgrounds, cursor positioning, scroll |
+| `task2` | `[a b c]` | Compute sum, max, product of 3 integers (default: 1, 2, 3) |
+| `calc` | — | Enter calculator sub-shell (`calc>`) |
+| `tictactoe` | — | Enter TicTacToe game (`ttt>`) |
+| `sysinfo` | — | Print memory layout, IRQ counters, system parameters |
+| `bench` | — | Run RDTSC-based performance benchmark suite |
+| `pink` | — | Toggle color theme (cyan / pink) |
+| `shutdown` | — | Halt: write `0x2000` to port `0x604`, fallback `cli; hlt` |
 
-<img width="657" height="901" alt="8" src="https://github.com/user-attachments/assets/07e0470b-5898-45b9-a701-c4c9424afbee" />
+### Calculator Sub-Shell (`calc>`)
 
-### How to use
+| Command | Computation | Error Handling |
+|---|---|---|
+| `add a b` | a + b | Rejects non-integer or wrong argument count |
+| `sub a b` | a - b | " |
+| `mul a b` | a * b | " |
+| `div a b` | a / b (integer, truncates toward 0) | Division by zero: explicit check |
+| `mod a b` | a mod b | Division by zero: explicit check |
+| `pow a b` | a^b (integer) | Negative exponent: explicit check |
+| `min a b` | min(a, b) | Rejects non-integer |
+| `max a b` | max(a, b) | " |
+| `mean a b` | (a + b) / 2 (truncated) | " |
+| `quit` | — | Return to main shell |
 
-1. Boot the OS (`make run` / `make run-curses`)
-2. At the `snowos>` prompt, run:
-   - `calc`
+Integer range: 32-bit signed (-2,147,483,648 to 2,147,483,647).
 
-In the `calc>` prompt:
+### TicTacToe (`ttt>`)
 
-- **Commands**:
-  - `help` — prints the calculator command menu
-  - `add a b` — prints \(a + b\)
-  - `sub a b` — prints \(a - b\)
-  - `mul a b` — prints \(a \cdot b\)
-  - `div a b` — prints integer division \(a / b\) (errors if \(b = 0\))
-  - `mod a b` — prints \(a \bmod b\) (errors if \(b = 0\))
-  - `pow a b` — prints integer power \(a^b\) (requires \(b \ge 0\))
-  - `min a b` — prints \(\min(a,b)\)
-  - `max a b` — prints \(\max(a,b)\)
-  - `mean a b` — prints \((a+b)/2\) using **integer division** (truncates toward 0 in C)
-  - `quit` — returns to `snowos>`
+| Input | Action |
+|---|---|
+| `1`-`9` | Place mark at board position (1=top-left, 9=bottom-right) |
+| `restart [x\|o]` | Reset board; optionally set starting player |
+| `clear` | Redraw current board |
+| `help` | Print command list |
+| `quit` | Return to main shell |
 
-### Main logic (how `source/calc.c` works)
+**Game parameters:**
 
-The calculator is implemented as a loop in `calculator_mode(primary_color)`:
-
-- **1) Entry behavior**
-  - When `snowos>` receives the command `calc`, it calls `calculator_mode(primary_color)` from `source/kernel.c`.
-  - `calculator_mode(...)` prints a menu once on entry (`calc_print_menu(...)`) and then displays the prompt `calc>`.
-
-- **2) Input + prompt**
-  - The calculator reads user input using the keyboard driver’s blocking line reader: `kbd_readline(buf, sizeof(buf))`.
-  - It reuses the OS theme color via the `primary_color` argument so calculator prompts/menu match the current shell theme.
-
-- **3) Command parsing (token-safe)**
-  - The code matches the first token using `k_match_cmd(line, "add", &args)` which:
-    - ignores leading whitespace (`k_skip_ws`)
-    - requires a **token boundary** (the next char must be whitespace or `'\0'`), so `addd` won’t match `add`
-    - returns a pointer (`args`) to the remaining argument string
-
-- **4) Integer parsing**
-  - Arguments are parsed by `k_parse_int(...)`, which supports optional `+`/`-` signs and decimal digits only.
-  - Each binary operator uses `k_parse_two_ints(args, &a, &b)` which:
-    - parses exactly **two** integers
-    - rejects extra trailing characters (after whitespace)
-
-- **5) Error handling**
-  - Wrong/missing arguments print a **usage line**, e.g. `Usage: add <a> <b>`.
-  - `div` / `mod` explicitly check `b == 0` and print `Error: divide by zero`.
-  - `pow` rejects negative exponents with `Error: exp must be >= 0`.
-  - Unknown commands print: `Unknown calculator command (type 'quit' to exit)`.
-
-### Where it lives
-
-- **Calculator implementation**: `source/calc.c` (public entrypoint declared in `source/menu.h`)
-- **Shell hook**: `source/kernel.c` handles `calc` and calls `calculator_mode(primary_color)`
-- **Input source**: `drivers/keyboard.c` provides `kbd_readline(...)` used by both the OS shell and calculator
-- **Parsing helpers**: shared `k_*` helpers are declared in `drivers/framebuffer.h` and implemented in `drivers/framebuffer.c`
-
-**What it does:** Token-matches commands, parses exactly two integers, and implements safety checks like divide-by-zero.
-
-```c
-// source/calc.c (command parsing + div safety)
-// Parsing helpers are shared and live in drivers/framebuffer.c/.h.
-if (k_match_cmd(buf, "div", &args)) {
-    if (!k_parse_two_ints(args, &a, &b)) write_str("Usage: div <a> <b>\n");
-    else if (b == 0) write_str("Error: divide by zero\n");
-    else { write_dec(a / b); put_char('\n'); }
-}
-```
+| Property | Value |
+|---|---|
+| Board representation | `uint8_t[9]`, values: 0=empty, 1=X, 2=O |
+| Win detection | 8 lines: 3 rows + 3 columns + 2 diagonals (table-driven) |
+| Win check complexity | O(8) per move (constant) |
+| Draw detection | Linear scan of 9 cells for any empty |
+| Colors | X = light red (12), O = light green (10) |
 
 ---
 
-## TicTacToe (`tictactoe`) Implementation
+## Input Parsing
 
-This repo includes a simple TicTacToe mini-game that runs inside the kernel shell.
+All parsing is freestanding (no libc). Helpers are in `drivers/framebuffer.c`.
 
-<img width="1113" height="865" alt="9" src="https://github.com/user-attachments/assets/81a85836-e04a-463e-8f43-d9b704058e7f" />
-
-### How to use
-
-1. Boot the OS (`make run` / `make run-curses`)
-2. At the `snowos>` prompt, run:
-   - `tictactoe`
-
-In the `ttt>` prompt:
-
-- **Moves**:
-  - Type a number **`1`..`9`** to place a mark in that square.
-- **Commands**:
-  - `clear` — clears the screen and redraws the current board
-  - `restart [x|o]` — resets the board (optionally choose who starts)
-  - `help` — prints the in-game help
-  - `quit` — returns to `snowos>`
-
-### Key behavior
-
-- **Board representation**: `uint8_t board[9]` where `0 = empty`, `1 = X`, `2 = O`.
-- **Win check**: uses the 8 standard winning triples (3 rows, 3 columns, 2 diagonals) to detect a winner.
-- **Turn order**:
-  - X always starts when entering the mode.
-  - `restart` defaults to X starting, but `restart o` lets O start.
-  - Turns then alternate normally after each valid move.
-- **Colors**:
-  - **X** is drawn in **Light Red**
-  - **O** is drawn in **Light Green**
-  - Empty squares show their position number (`1`–`9`) for easy input.
-- **Clear utilization**: `clear` calls the framebuffer `clear_screen()` and then redraws the board.
-
-### Win detection (detailed)
-
-TicTacToe treats the board as a **flat array** of 9 cells (`board[0]..board[8]`). Player input uses **1–9**, which maps to indices **0–8**:
-
-- **Input → index mapping**:
-  - `1 2 3` → indices `0 1 2`
-  - `4 5 6` → indices `3 4 5`
-  - `7 8 9` → indices `6 7 8`
-
-The game checks for a win by testing these **8 lines** (each line is a triple of indices that must all belong to the same player):
-
-- **Rows**: `(0,1,2)`, `(3,4,5)`, `(6,7,8)`
-- **Columns**: `(0,3,6)`, `(1,4,7)`, `(2,5,8)`
-- **Diagonals**: `(0,4,8)`, `(2,4,6)`
-
-In code, this logic lives in `ttt_won(board, player)`:
-
-- It stores the 8 triples in a small constant table `w[8][3]`.
-- It loops through each triple `(a,b,c)`.
-- If `board[a] == player && board[b] == player && board[c] == player`, it returns **1** (win found).
-- If none match, it returns **0** (no win yet).
-
-<img width="1089" height="523" alt="10" src="https://github.com/user-attachments/assets/ebeb06e8-1fb4-4961-9af5-53c02891626e" />
-
-**Example:** if player **X** has marks at indices `0, 4, 8` (input squares `1, 5, 9`), then the diagonal `(0,4,8)` matches and `ttt_won(...)` returns true. After that, the main loop prints `Winner: X` and sets `game_over = 1` so no more numeric moves are accepted until `restart` or `quit`.
-
-### Main game logic (how `source/tictactoe.c` works)
-
-The entire game is driven by `tictactoe_mode(primary_color)` and a single infinite loop that reads one line of input, applies it to the board (or handles a command), redraws, and checks for end-of-game.
-
-- **1) Initialization**
-  - **Board reset**: `board[0..8]` is set to `0` (empty).
-  - **Starting player**: **X (1)** starts when entering the mode. `restart` defaults to X, but `restart o` lets O start.
-  - **First render**: `clear_screen()`, then `ttt_draw(board, primary_color)` to draw the board, then `ttt_print_help(primary_color)` to show available commands.
-
-- **2) Input loop**
-  - Each iteration prints whose turn it is (**Player’s X/O**) and a `ttt>` prompt.
-  - It then blocks on `kbd_readline(buf, sizeof(buf))` to read a full command line from the keyboard driver.
-
-- **3) Command handling (non-move inputs)**
-  - `quit` → prints a message and returns back to the OS shell.
-  - `help` → prints the in-game help and continues the loop.
-  - `clear` → clears the screen and redraws the current board (does not change state).
-  - `restart [x|o]` → resets the board to empty, clears `game_over`, sets the starting turn, clears the screen, and redraws.
-  - Empty input (just Enter) → ignored.
-
-- **4) “Game over” gating**
-  - Once a win or draw occurs, the code sets `game_over = 1`.
-  - While `game_over` is set, numeric moves are rejected with: `Game over. Type 'restart' or 'quit'.`
-
-- **5) Move parsing + validation**
-  - Moves must be entered as a single digit **`1`..`9`** (whitespace allowed). This is parsed by `ttt_parse_move(...)`.
-  - If the input is not a valid move, the game prints: `Invalid input. Type 1-9, or 'help'.`
-  - If the selected square is already occupied (`board[idx] != 0`), it prints: `That square is taken. Choose another.`
-
-- **6) Apply move + redraw**
-  - On a valid move, the game writes `board[idx] = player`, then clears the screen and redraws the board.
-  - Rendering detail: empty cells display their position number via `ttt_cell_char(...)`, so players can always see which digit maps to which square.
-
-- **7) Win / draw detection**
-  - **Win**: after each successful move, `ttt_won(board, player)` checks the 8 standard winning lines. If true, it prints `Winner: X` or `Winner: O`, prints the restart/quit hint, and sets `game_over = 1`.
-  - **Draw**: if there is no win, `ttt_full(board)` checks for any remaining `0` cells. If full, it prints `Draw.`, prints the restart/quit hint, and sets `game_over = 1`.
-
-- **8) Turn alternation**
-  - If the game is not over, the current player toggles after each successful move:
-    - `player = (player == 1) ? 2 : 1;`
-
-### Where it lives
-
-- **Game code**: `source/tictactoe.c` (public entrypoint declared in `source/menu.h`)
-- **Shell hook**: `source/kernel.c` adds the `tictactoe` command and calls `tictactoe_mode(primary_color)`
-- **Build**: `Makefile` compiles/links `source/tictactoe.c` into the kernel ISO
-
-```c
-// source/tictactoe.c (win detection)
-static int ttt_won(const uint8_t board[9], uint8_t player) {
-    static const uint8_t w[8][3] = {
-        {0, 1, 2}, {3, 4, 5}, {6, 7, 8},
-        {0, 3, 6}, {1, 4, 7}, {2, 5, 8},
-        {0, 4, 8}, {2, 4, 6}
-    };
-    for (int i = 0; i < 8; i++) {
-        uint8_t a = w[i][0], b = w[i][1], c = w[i][2];
-        if (board[a] == player && board[b] == player && board[c] == player) return 1;
-    }
-    return 0;
-}
-```
-
-This code encodes the 8 winning triples and checks them after each move.
-
-A compact table-driven win check is simple, fast, and easy to reason about in a kernel environment (no dynamic memory, minimal helpers).
+| Function | Behavior | Complexity |
+|---|---|---|
+| `k_skip_ws(s)` | Advance past spaces and tabs | O(n) |
+| `k_match_cmd(line, cmd, &rest)` | Token match with boundary check; `"add"` does not match `"addd"` | O(len(cmd)) |
+| `k_parse_int(s, &val, &end)` | Signed decimal parse; `+`/`-` prefix supported | O(digits) |
+| `k_parse_two_ints(s, &a, &b)` | Parse exactly 2 integers; reject trailing non-whitespace | O(n) |
+| `k_parse_three_ints(s, &a, &b, &c)` | Parse exactly 3 integers; reject trailing non-whitespace | O(n) |
 
 ---
 
-## Testing and Verification
+## Verification Protocol
 
-* **Build artifacts**: After `make`, confirm `kernel.elf` and `os.iso` exist/are updated.
-* **Boot + entry to C (`kmain`)**: After `make run` (or `make run-curses`), confirm the SnowOS banner appears and you reach the `snowos>` prompt.
-* **Framebuffer driver**: Confirm text output, colors, cursor movement, and scrolling work (e.g., use `clear` and print enough lines with `echo ...` to force scroll).
-* **Interrupts + PIC remap**: Confirm you see the status line `Status: IRQ on | keyboard ready` and that keyboard typing works afterwards (IRQ1).
-* **Keyboard input + editing**: Confirm characters echo as you type, Enter submits a command, and Backspace removes characters (visually and from the submitted buffer).
-* **Shell commands**: Verify `help`, `clear`, `echo ...`, `version`, `pink`, `calc`, and `shutdown` behave as described in the Shell Features section.
-* **Calculator mode**: Run `calc`, try `add 2 3`, `div 5 0` (divide-by-zero error), and `quit` to return to `snowos>`.
-* **Task 2 stack argument passing**: Run `task2` (defaults to `1 2 3`) and verify it prints sum/max/product; also try `task2 7 4 5` and `task2 2 3 4` to sanity-check max/product.
+### Build Verification
 
-### CLI parsing helpers (token + integer parsing)
+| # | Test | Command | Expected Result |
+|---|---|---|---|
+| 1 | Compilation | `make` | Exit 0; `kernel.elf` and `os.iso` produced |
+| 2 | Zero warnings | `make 2>&1 \| grep warning` | No output |
+| 3 | Section sizes | `make size` | Non-zero `.text`; total ~32 KiB |
+| 4 | Clean rebuild | `make clean && make` | Identical output to test 1 |
 
-The shell + sub-modes use shared, no-libc parsing helpers declared in `drivers/framebuffer.h` and implemented in `drivers/framebuffer.c`:
+### Boot Verification
 
-- `k_skip_ws(...)` — ignore leading spaces/tabs
-- `k_match_cmd(line, "cmd", &args)` — token match with a required boundary (prevents `addd` matching `add`)
-- `k_parse_int(...)` — signed decimal integer parsing (`+`/`-` supported)
-- `k_parse_two_ints(...)`, `k_parse_three_ints(...)` — parse exactly N integers and reject extra trailing junk
+| # | Test | Expected Output |
+|---|---|---|
+| 5 | Kernel boots | `SnowOS vX.Y.Z (alpha)` banner displayed |
+| 6 | IRQ enabled | `Status: IRQ on \| keyboard ready` printed |
+| 7 | Shell prompt | `snowos>` appears; keyboard input accepted |
 
-Use these tests to verify the helpers are behaving correctly end-to-end:
+### Functional Verification
 
-- **Whitespace handling**
-  - `snowos>   task2    1   2   3` should succeed (leading + repeated whitespace).
-  - `calc>    add   2    3` should print `5`.
+| # | Input | Expected Output | Tests |
+|---|---|---|---|
+| 8 | `help` | Boxed command list, 14 entries | Help rendering |
+| 9 | `echo hello` | `hello` | String echo |
+| 10 | `version` | `SnowOS vX.Y.Z (alpha)` | Version formatting |
+| 11 | `task2` | sum=6, max=3, product=6 | Default args (1,2,3) |
+| 12 | `task2 7 4 5` | sum=16, max=7, product=140 | Custom args |
+| 13 | `task2 -1 2 -3` | sum=-2, max=2, product=6 | Signed args |
+| 14 | `task2 1 2` | `Usage: task2 <a> <b> <c>` | Arg count validation |
+| 15 | `task2 1 2 3 4` | `Usage: task2 <a> <b> <c>` | Extra arg rejection |
+| 16 | `sysinfo` | Section addresses + sizes, IRQ counters | Runtime introspection |
+| 17 | `bench` | 4 cycle measurements with per-unit costs | RDTSC instrumentation |
 
-- **Token boundary safety**
-  - `calc> addd 1 2` should be rejected as an unknown command (must not match `add`).
-  - `snowos> task2x 1 2 3` should be rejected (must not match `task2`).
+### Calculator Verification
 
-- **Signed integer parsing**
-  - `calc> add -2 3` should print `1`.
-  - `snowos> task2 -1 +2 -3` should succeed (sum/max/product printed).
+| # | Input (in `calc>`) | Expected | Tests |
+|---|---|---|---|
+| 18 | `add 2 3` | `5` | Basic arithmetic |
+| 19 | `add -2 3` | `1` | Signed operands |
+| 20 | `div 10 3` | `3` | Integer truncation |
+| 21 | `div 5 0` | `Error: divide by zero` | Zero divisor check |
+| 22 | `pow 2 10` | `1024` | Exponentiation |
+| 23 | `pow 2 -1` | `Error: exp must be >= 0` | Negative exponent check |
+| 24 | `addd 1 2` | `Unknown calculator command` | Token boundary safety |
+| 25 | `add 1 2x` | `Usage: add <a> <b>` | Trailing garbage rejection |
+| 26 | `quit` | Returns to `snowos>` | Exit behavior |
 
-- **Exact-argument validation / trailing garbage rejection**
-  - `snowos> task2 1 2` should print the usage line `Usage: task2 <a> <b> <c>`.
-  - `snowos> task2 1 2 3 4` should print the usage line (rejects extra tokens).
-  - `calc> add 1 2x` should print `Usage: add <a> <b>` (rejects trailing non-digit junk).
+### TicTacToe Verification
 
-- **TicTacToe command parsing**
-  - In `ttt>`: `restart o` should restart the game with **O** going first.
-  - In `ttt>`: `5` should place a mark in the center.
+| # | Input Sequence (in `ttt>`) | Expected | Tests |
+|---|---|---|---|
+| 27 | `1`, `4`, `2`, `5`, `3` | `Winner: X` | Row win (top) |
+| 28 | `1`, `2`, `5`, `3`, `9` | `Winner: X` | Diagonal win |
+| 29 | `1` then `1` | `That square is taken` | Occupied cell rejection |
+| 30 | `restart o`, then move | O goes first | Restart with player choice |
+
+### Whitespace / Edge Cases
+
+| # | Input | Expected | Tests |
+|---|---|---|---|
+| 31 | `   task2    1   2   3` | sum=6, max=3, product=6 | Leading + repeated whitespace |
+| 32 | (empty, just Enter) | New prompt, no output | Empty input |
+| 33 | `task2x 1 2 3` | `Unknown command: task2x 1 2 3` | Token boundary at shell level |
 
 ---
 
-## Known Limitations
+## Known Constraints
 
-* No memory management (malloc/free).
-* No file system.
-* Framebuffer driver supports only **80x25** text mode.
-* Single-tasking (infinite loop shell).
+| Constraint | Quantification | Impact |
+|---|---|---|
+| No heap allocator | 0 bytes dynamic memory | All buffers fixed at compile time |
+| No filesystem | 0 file operations | No persistent storage |
+| Display fixed | 80 x 25 = 2,000 cells (4,000 B) | No graphics mode, no resize |
+| Keyboard layout | US QWERTY, 128-entry table | No international layouts, no modifier keys |
+| Input buffer | 256 bytes; overflow drops silently | Fast typing during slow operations may lose chars |
+| Command buffer | 128 bytes; longer input truncated | Max command length: 127 characters + NUL |
+| Integer range | 32-bit signed | -2,147,483,648 to 2,147,483,647 |
+| Stack depth | 4,096 bytes; no overflow detection | Deep recursion or large locals will corrupt memory |
+| Concurrency | Single-threaded; `hlt` blocks CPU | No background tasks possible |
+| Timer | No PIT/HPET/RTC driver | No wall-clock time; cycle counts via RDTSC only |
+
+---
+
+## References
+
+1. E. Helin and A. Renberg, *The Little Book of OS Development*, 2015.
+2. Intel Corporation, *Intel 64 and IA-32 Architectures Software Developer's Manual*, Vol. 3A, Ch. 6: Interrupt and Exception Handling.
+3. Intel Corporation, *Intel 64 and IA-32 Architectures Software Developer's Manual*, Vol. 2B: RDTSC instruction reference.
+4. OSDev Wiki, "8259 PIC," https://wiki.osdev.org/PIC.
+5. OSDev Wiki, "Interrupt Descriptor Table," https://wiki.osdev.org/IDT.
+6. GNU Multiboot Specification, version 0.6.96.
+7. QEMU Documentation, https://www.qemu.org/docs/master/.
+
+---
+
+## License
+
+MIT. See [LICENSE](LICENSE).

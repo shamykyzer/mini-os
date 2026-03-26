@@ -56,6 +56,7 @@ void put_char(char c);
 void write_str(const char *s);
 void write_dec(int value);
 void write_dec_ll(long long value);
+void write_hex(uint32_t value);
 
 /* Selection Support */
 char framebuffer_get_char(uint16_t x, uint16_t y);

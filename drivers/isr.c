@@ -6,6 +6,10 @@
 // Lookup table for registered C interrupt handlers (indexed by vector 0-255).
 static isr_t interrupt_handlers[256];
 
+// Per-IRQ event counters for system instrumentation.
+static uint32_t irq_counts[16];
+static uint32_t total_irqs;
+
 void register_interrupt_handler(uint8_t n, isr_t handler) {
     interrupt_handlers[n] = handler;
 }
@@ -33,11 +37,29 @@ void isr_handler(registers_t *regs) {
 void irq_handler(registers_t *regs) {
     if (regs == 0 || regs->int_no >= 256) return;
 
+    // Count this IRQ event.
+    uint8_t irq_num = (uint8_t)(regs->int_no - IRQ_BASE);
+    if (irq_num < 16) irq_counts[irq_num]++;
+    total_irqs++;
+
     // EOI (End Of Interrupt): if from slave, ACK slave then master; otherwise just master.
     if (regs->int_no >= PIC_2_OFFSET) outb(PIC_2_COMMAND, PIC_ACKNOWLEDGE);
     outb(PIC_1_COMMAND, PIC_ACKNOWLEDGE);
 
     dispatch_interrupt(regs);
+}
+
+uint32_t get_irq_count(uint8_t irq) {
+    return (irq < 16) ? irq_counts[irq] : 0;
+}
+
+uint32_t get_total_irq_count(void) {
+    return total_irqs;
+}
+
+void reset_irq_counters(void) {
+    for (int i = 0; i < 16; i++) irq_counts[i] = 0;
+    total_irqs = 0;
 }
 
 typedef void (*stub_t)(void);

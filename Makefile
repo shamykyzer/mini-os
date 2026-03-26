@@ -39,7 +39,7 @@ OBJS = $(BUILD_DIR)/loader.o \
        $(BUILD_DIR)/pic.o \
        $(BUILD_DIR)/keyboard.o
 
-.PHONY: all run run_log clean
+.PHONY: all run run_log clean size
 
 # Build everything: kernel + ISO
 all: $(ISO)
@@ -166,6 +166,10 @@ run_log: $(ISO)
 		-device isa-debug-exit,iobase=0xf4,iosize=0x04 \
 		-boot d -cdrom $(ISO) \
 		-m 32 -d cpu -D logQ.txt
+
+# Report ELF section sizes
+size: $(KERNEL)
+	size $(KERNEL)
 
 # Clean build
 clean:

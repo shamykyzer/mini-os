@@ -37,4 +37,9 @@ typedef void (*isr_t)(registers_t *regs);
 void register_interrupt_handler(uint8_t n, isr_t handler);
 void init_interrupt_gates(void);
 
+// IRQ event counters (for instrumentation / sysinfo).
+uint32_t get_irq_count(uint8_t irq);
+uint32_t get_total_irq_count(void);
+void     reset_irq_counters(void);
+
 #endif

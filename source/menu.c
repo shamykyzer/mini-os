@@ -165,6 +165,26 @@ void show_help_menu(uint8_t primary_color) {
     put_char('|');
     put_char('\n');
 
+    line = "  sysinfo   - Memory layout, IRQ counters, parameters";
+    put_char('|');
+    set_color(primary_color, FRAMEBUFFER_COLOR_BLACK);
+    write_str("  sysinfo");
+    set_color(FRAMEBUFFER_COLOR_WHITE, FRAMEBUFFER_COLOR_BLACK);
+    write_str("   - Memory layout, IRQ counters, parameters");
+    write_n_chars(' ', inner_width - k_strlen(line));
+    put_char('|');
+    put_char('\n');
+
+    line = "  bench     - Run performance benchmarks (RDTSC)";
+    put_char('|');
+    set_color(primary_color, FRAMEBUFFER_COLOR_BLACK);
+    write_str("  bench");
+    set_color(FRAMEBUFFER_COLOR_WHITE, FRAMEBUFFER_COLOR_BLACK);
+    write_str("     - Run performance benchmarks (RDTSC)");
+    write_n_chars(' ', inner_width - k_strlen(line));
+    put_char('|');
+    put_char('\n');
+
     // Bottom border
     put_char('+');
     write_n_chars('-', inner_width);

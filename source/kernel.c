@@ -6,6 +6,13 @@
 #include "menu.h"
 #include "version.h"
 
+/* Linker-provided symbols marking section boundaries (see link.ld). */
+extern char _kernel_start, _kernel_end;
+extern char _text_start,   _text_end;
+extern char _rodata_start, _rodata_end;
+extern char _data_start,   _data_end;
+extern char _bss_start,    _bss_end;
+
 // Helper function to compare two strings
 // Returns 0 if strings are equal, non-zero otherwise
 int strcmp(const char *s1, const char *s2) {
@@ -102,6 +109,132 @@ static void vga_test(void) {
     }
 
     set_color(FRAMEBUFFER_COLOR_WHITE, FRAMEBUFFER_COLOR_BLACK);
+}
+
+/* Read the low 32 bits of the CPU Time-Stamp Counter (RDTSC).
+ * Sufficient for measuring operations under ~4 billion cycles. */
+static uint32_t rdtsc_lo(void) {
+    uint32_t lo;
+    __asm__ __volatile__("rdtsc" : "=a"(lo) : : "edx");
+    return lo;
+}
+
+static void print_section(const char *name, uint32_t start, uint32_t end) {
+    write_str("  ");
+    write_str(name);
+    write_str("  ");
+    write_hex(start);
+    write_str(" - ");
+    write_hex(end);
+    write_str("  ");
+    write_dec((int)(end - start));
+    write_str(" B\n");
+}
+
+static void sysinfo_command(uint8_t primary_color) {
+    set_color(FRAMEBUFFER_COLOR_WHITE, FRAMEBUFFER_COLOR_BLACK);
+    write_str("=== System Information ===\n\n");
+
+    /* Memory layout from linker symbols */
+    set_color(primary_color, FRAMEBUFFER_COLOR_BLACK);
+    write_str("Memory Layout:\n");
+    set_color(FRAMEBUFFER_COLOR_LIGHT_GREY, FRAMEBUFFER_COLOR_BLACK);
+
+    print_section(".text  ", (uint32_t)&_text_start,   (uint32_t)&_text_end);
+    print_section(".rodata", (uint32_t)&_rodata_start, (uint32_t)&_rodata_end);
+    print_section(".data  ", (uint32_t)&_data_start,   (uint32_t)&_data_end);
+    print_section(".bss   ", (uint32_t)&_bss_start,    (uint32_t)&_bss_end);
+
+    write_str("  Total kernel: ");
+    write_dec((int)((uint32_t)&_kernel_end - (uint32_t)&_kernel_start));
+    write_str(" B\n\n");
+
+    /* Static system parameters */
+    set_color(primary_color, FRAMEBUFFER_COLOR_BLACK);
+    write_str("System Parameters:\n");
+    set_color(FRAMEBUFFER_COLOR_LIGHT_GREY, FRAMEBUFFER_COLOR_BLACK);
+    write_str("  Framebuffer : ");
+    write_dec(FRAMEBUFFER_WIDTH); write_str("x"); write_dec(FRAMEBUFFER_HEIGHT);
+    write_str(" ("); write_dec(FRAMEBUFFER_WIDTH * FRAMEBUFFER_HEIGHT * 2); write_str(" B) @ ");
+    write_hex(FRAMEBUFFER_ADDRESS); put_char('\n');
+    write_str("  IDT gates   : 48 (32 exceptions + 16 IRQs)\n");
+    write_str("  PIC vectors : 0x20 - 0x2F\n");
+    write_str("  Kernel stack: 4096 B\n");
+    write_str("  Input buffer: 256 B (circular)\n");
+    write_str("  Cmd buffer  : 128 B\n\n");
+
+    /* IRQ counters */
+    set_color(primary_color, FRAMEBUFFER_COLOR_BLACK);
+    write_str("IRQ Counters:\n");
+    set_color(FRAMEBUFFER_COLOR_LIGHT_GREY, FRAMEBUFFER_COLOR_BLACK);
+    write_str("  Total: "); write_dec((int)get_total_irq_count()); put_char('\n');
+    for (int i = 0; i < 16; i++) {
+        uint32_t c = get_irq_count((uint8_t)i);
+        if (c > 0) {
+            write_str("  IRQ"); write_dec(i); write_str(": "); write_dec((int)c); put_char('\n');
+        }
+    }
+}
+
+static void bench_command(uint8_t primary_color) {
+    uint32_t start;
+    uint32_t cycles_clear, cycles_write80, cycles_putchar, cycles_writedec;
+
+    /* --- Run all measurements, then display results on a clean screen --- */
+
+    /* 1. clear_screen: fill 2000 VGA cells with spaces */
+    start = rdtsc_lo();
+    clear_screen();
+    cycles_clear = rdtsc_lo() - start;
+
+    /* 2. write_str: 80-character string (one full row) */
+    start = rdtsc_lo();
+    write_str("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH");
+    cycles_write80 = rdtsc_lo() - start;
+
+    /* 3. put_char: 2000 individual calls (one full screen) */
+    clear_screen();
+    start = rdtsc_lo();
+    for (int i = 0; i < 2000; i++) put_char('.');
+    cycles_putchar = rdtsc_lo() - start;
+
+    /* 4. write_dec: 100 integer-to-decimal conversions */
+    clear_screen();
+    start = rdtsc_lo();
+    for (int i = 0; i < 100; i++) write_dec(123456);
+    cycles_writedec = rdtsc_lo() - start;
+
+    /* --- Display results --- */
+    clear_screen();
+    set_color(FRAMEBUFFER_COLOR_WHITE, FRAMEBUFFER_COLOR_BLACK);
+    write_str("=== Performance Benchmarks (CPU cycles via RDTSC) ===\n\n");
+
+    set_color(primary_color, FRAMEBUFFER_COLOR_BLACK);
+    write_str("Framebuffer Throughput:\n");
+    set_color(FRAMEBUFFER_COLOR_LIGHT_GREY, FRAMEBUFFER_COLOR_BLACK);
+
+    write_str("  clear_screen()      ");
+    write_dec((int)cycles_clear); write_str(" cyc  (");
+    write_dec((int)(cycles_clear / 2000)); write_str(" cyc/cell)\n");
+
+    write_str("  write_str(80 chars) ");
+    write_dec((int)cycles_write80); write_str(" cyc  (");
+    write_dec((int)(cycles_write80 / 80)); write_str(" cyc/char)\n");
+
+    write_str("  put_char x2000      ");
+    write_dec((int)cycles_putchar); write_str(" cyc  (");
+    write_dec((int)(cycles_putchar / 2000)); write_str(" cyc/char)\n");
+
+    write_str("  write_dec x100      ");
+    write_dec((int)cycles_writedec); write_str(" cyc  (");
+    write_dec((int)(cycles_writedec / 100)); write_str(" cyc/call)\n");
+
+    put_char('\n');
+    set_color(primary_color, FRAMEBUFFER_COLOR_BLACK);
+    write_str("IRQ Statistics (since boot):\n");
+    set_color(FRAMEBUFFER_COLOR_LIGHT_GREY, FRAMEBUFFER_COLOR_BLACK);
+    write_str("  Total IRQs serviced: "); write_dec((int)get_total_irq_count()); put_char('\n');
+    write_str("  IRQ1 (keyboard):     "); write_dec((int)get_irq_count(1)); put_char('\n');
 }
 
 // Main kernel entry point
@@ -206,6 +339,10 @@ void kmain(void) {
             set_color(FRAMEBUFFER_COLOR_LIGHT_GREEN, FRAMEBUFFER_COLOR_BLACK);
             write_str(buffer + 5);
             put_char('\n');
+        } else if (strcmp(buffer, "sysinfo") == 0) {
+            sysinfo_command(primary_color);
+        } else if (strcmp(buffer, "bench") == 0) {
+            bench_command(primary_color);
         } else if (strcmp(buffer, "calc") == 0) {
             calculator_mode(primary_color);
         } else if (strcmp(buffer, "tictactoe") == 0) {

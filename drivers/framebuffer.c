@@ -228,6 +228,16 @@ void write_dec_ll(long long value) {
         put_char(buf[j]);
 }
 
+/* Write a 32-bit unsigned value in hexadecimal with 0x prefix. */
+void write_hex(uint32_t value) {
+    static const char hex[] = "0123456789ABCDEF";
+    put_char('0');
+    put_char('x');
+    for (int i = 28; i >= 0; i -= 4) {
+        put_char(hex[(value >> i) & 0xF]);
+    }
+}
+
 /* --- New Selection Functions --- */
 
 char framebuffer_get_char(uint16_t x, uint16_t y) {
